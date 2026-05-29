@@ -80,5 +80,3 @@ Pada cara manual, developer harus SSH ke server, pull image, stop container, lal
 | `needs: build` | Menjamin deploy hanya berjalan jika build berhasil |
 
 Catatan: job deploy menggunakan `self-hosted runner` karena Minikube berjalan secara lokal di laptop. Jika deploy dijalankan di `ubuntu-latest`, runner GitHub tidak dapat mengakses sertifikat dan endpoint Minikube lokal.
-
-demo trigger pipeline
