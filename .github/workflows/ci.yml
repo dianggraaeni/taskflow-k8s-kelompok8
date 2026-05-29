@@ -1,4 +1,4 @@
-name: CI/CD Pipeline — Build & Deploy to Kubernetes
+name: CI/CD Pipeline - Build & Deploy to Kubernetes
 
 on:
   push:
@@ -11,9 +11,6 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/taskflow-api
 
 jobs:
-  # ──────────────────────────────────────────
-  # Build & Push Docker Image ke GHCR
-  # ──────────────────────────────────────────
   build:
     name: Build & Push Image
     runs-on: ubuntu-latest
@@ -42,12 +39,9 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-  # ──────────────────────────────────────────
-  # Deploy ke Kubernetes
-  # ──────────────────────────────────────────
   deploy:
     name: Deploy ke Kubernetes
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
@@ -61,33 +55,33 @@ jobs:
           version: 'latest'
 
       - name: Konfigurasi kubeconfig
+        shell: powershell
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
+          $kubeDir = Join-Path $env:USERPROFILE ".kube"
+          New-Item -ItemType Directory -Force -Path $kubeDir
+          $kubeConfigPath = Join-Path $kubeDir "config"
+          [IO.File]::WriteAllBytes($kubeConfigPath, [Convert]::FromBase64String("${{ secrets.KUBECONFIG_BASE64 }}"))
+          kubectl config current-context
 
       - name: Update image di Deployment
+        shell: powershell
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
-          echo "→ Deploy image: $IMAGE"
-
-          kubectl set image deployment/taskflow-api \
-            taskflow-api=$IMAGE \
-            -n taskflow-prod
+          $image = "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          echo "Deploy image: $image"
+          kubectl set image deployment/taskflow-api taskflow-api=$image -n taskflow-prod
 
       - name: Tunggu rollout selesai
+        shell: powershell
         run: |
-          kubectl rollout status deployment/taskflow-api \
-            -n taskflow-prod \
-            --timeout=120s
+          kubectl rollout status deployment/taskflow-api -n taskflow-prod --timeout=120s
 
       - name: Verifikasi deployment
+        shell: powershell
         run: |
-          echo "→ Status Pod setelah deploy:"
+          echo "Status Pod setelah deploy:"
           kubectl get pods -n taskflow-prod
           echo ""
-          echo "→ Image yang berjalan:"
-          kubectl get deployment taskflow-api -n taskflow-prod \
-            -o jsonpath='{.spec.template.spec.containers[0].image}'
+          echo "Image yang berjalan:"
+          kubectl get deployment taskflow-api -n taskflow-prod -o jsonpath='{.spec.template.spec.containers[0].image}'
           echo ""
-          echo "✅ Deploy berhasil!"
+          echo "Deploy berhasil!"
