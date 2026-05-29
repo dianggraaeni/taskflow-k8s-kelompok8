@@ -1,0 +1,12 @@
+﻿=== HASIL PENGUKURAN SELF-HEALING ===
+Tanggal       : 2026-05-29 22:48
+Namespace     : taskflow-prod
+Pod dihapus   : taskflow-api-5cfc554d6f-q49qk
+Pod pengganti : taskflow-api-5cfc554d6f-g4q9k
+
+Waktu delete  : 22:47:56.183
+Waktu Pending : 22:47:56.828  (+0.65s)
+Waktu Running : 22:48:00.688  (+4.51s)
+
+TOTAL RECOVERY TIME: 4.51 detik
+

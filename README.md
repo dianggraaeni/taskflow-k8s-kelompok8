@@ -12,12 +12,15 @@ Proyek ini memindahkan aplikasi TaskFlow ke Kubernetes untuk mengatasi tiga insi
 | **#2** | Deploy fitur baru, aplikasi mati 8 menit | **Rolling update** — zero downtime |
 | **#3** | Rollback manual memakan 25 menit | **`kubectl rollout undo`** — < 60 detik |
 
+---
+
 ## Struktur Repository
 
 ```
 taskflow-k8s-kelompok8/
-├── README.md                            ← Dokumentasi utama
+├── README.md                            ← Dokumentasi utama (ini)
 ├── Dockerfile                           ← Image untuk CI/CD pipeline
+├── deploy.sh                            ← Script deploy satu perintah
 ├── .gitignore
 ├── .github/
 │   └── workflows/
@@ -27,38 +30,83 @@ taskflow-k8s-kelompok8/
 │   ├── namespace-prod.yaml              ← Namespace production
 │   ├── deployment.yaml                  ← Deployment (2 replicas, rolling update)
 │   └── service.yaml                     ← Service NodePort (port 30080)
-├── deploy.sh                            ← Script deploy satu perintah
 └── docs/
     ├── cicd-ke-kubernetes.md            ← Dokumentasi alur CI/CD
     ├── insiden-1-selfhealing.md         ← Laporan insiden 1
     ├── insiden-2-rolling-update.md      ← Laporan insiden 2
     ├── insiden-3-rollback.md            ← Laporan insiden 3
-    ├── insiden-6-isolation.md           ← Laporan isolasi namespace
-    └── screenshots/                     ← Screenshot bukti demo
+    └── insiden-6-isolation.md           ← Laporan isolasi namespace
 ```
+
+---
 
 ## Cara Menjalankan dari Awal
 
 ### Prasyarat
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- [Minikube](https://minikube.sigs.k8s.io/docs/start/)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+Pastikan tools berikut sudah terinstall di laptop kamu:
 
-### 1. Start Minikube
+| Tool | Versi Minimum | Link Install |
+|------|---------------|--------------|
+| **Docker Desktop** | 24.x | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop) |
+| **Minikube** | 1.30+ | [minikube.sigs.k8s.io/docs/start](https://minikube.sigs.k8s.io/docs/start/) |
+| **kubectl** | 1.27+ | [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) |
+
+Verifikasi instalasi:
+
+```bash
+docker --version       # Docker version 24.x.x
+minikube version       # minikube version: v1.3x.x
+kubectl version --client  # Client Version: v1.2x.x
+```
+
+---
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/dianggraaeni/taskflow-k8s-kelompok8.git
+cd taskflow-k8s-kelompok8
+```
+
+### 2. Start Minikube
 
 ```bash
 minikube start --cpus=2 --memory=4096
 ```
 
-### 2. Deploy dengan satu perintah
+Tunggu hingga muncul pesan:
+```
+✅  Done! kubectl is now configured to use "minikube" cluster
+```
+
+Verifikasi cluster berjalan:
+```bash
+minikube status
+kubectl get nodes
+```
+
+### 3. Deploy dengan Satu Perintah
 
 ```bash
+# Berikan permission eksekusi (hanya perlu sekali)
 chmod +x deploy.sh
+
+# Jalankan orchestrator script
 ./deploy.sh
 ```
 
-Atau secara manual:
+Script `deploy.sh` akan secara otomatis:
+1. ✅ Memvalidasi tools (minikube & kubectl)
+2. ✅ Mengecek status minikube (start jika belum berjalan)
+3. ✅ Membuat namespace `taskflow-dev` dan `taskflow-prod`
+4. ✅ Men-deploy aplikasi ke `taskflow-prod`
+5. ✅ Menunggu semua Pod Ready
+6. ✅ Menampilkan URL akses
+
+#### Alternatif: Deploy Manual
+
+Jika lebih suka manual, jalankan langkah-langkah berikut:
 
 ```bash
 # Buat namespace
@@ -66,8 +114,8 @@ kubectl apply -f kubernetes/namespace-dev.yaml
 kubectl apply -f kubernetes/namespace-prod.yaml
 
 # Deploy ke production
-kubectl apply -f kubernetes/deployment.yaml -n taskflow-prod
-kubectl apply -f kubernetes/service.yaml -n taskflow-prod
+kubectl apply -f kubernetes/deployment.yaml
+kubectl apply -f kubernetes/service.yaml
 
 # Tunggu deployment selesai
 kubectl rollout status deployment/taskflow-api -n taskflow-prod
@@ -76,7 +124,7 @@ kubectl rollout status deployment/taskflow-api -n taskflow-prod
 minikube service taskflow-api -n taskflow-prod --url
 ```
 
-### 3. Verifikasi
+### 4. Verifikasi
 
 ```bash
 # Semua resource di production
@@ -84,8 +132,31 @@ kubectl get all -n taskflow-prod
 
 # Akses aplikasi
 curl http://$(minikube ip):30080
-# Output: Halo dari TaskFlow v1!
+# Output yang diharapkan: Halo dari TaskFlow v1!
 ```
+
+---
+
+## Arsitektur Cluster
+
+```
+Minikube Cluster
+├── Namespace: taskflow-prod (PRODUCTION)
+│   ├── Deployment: taskflow-api
+│   │   ├── Pod 1 (taskflow-api)  ← Running
+│   │   └── Pod 2 (taskflow-api)  ← Running
+│   └── Service: taskflow-api (NodePort :30080)
+│
+└── Namespace: taskflow-dev (DEVELOPMENT)
+    ├── Deployment: taskflow-api
+    │   ├── Pod 1 (taskflow-api)  ← Running
+    │   └── Pod 2 (taskflow-api)  ← Running
+    └── Service: taskflow-api (NodePort :30081)
+```
+
+Kedua namespace **terisolasi sepenuhnya** — kekacauan di `taskflow-dev` tidak mempengaruhi `taskflow-prod` sedikitpun.
+
+---
 
 ## Alur CI/CD
 
@@ -93,10 +164,12 @@ Pipeline CI/CD berjalan otomatis via GitHub Actions setiap push ke `main`.
 
 ### Jobs
 
-| Job | Fungsi |
-|-----|--------|
-| `build` | Build Docker image, push ke GHCR dengan tag `sha-<commit>` |
-| `deploy` | Update image di Kubernetes, rolling update zero downtime |
+| Job | Runner | Fungsi |
+|-----|--------|--------|
+| `build` | `ubuntu-latest` | Build Docker image, push ke GHCR dengan tag `sha-<commit>` |
+| `deploy` | `self-hosted` | Update image di Kubernetes, rolling update zero downtime |
+
+> **Mengapa `self-hosted` runner?** Job deploy perlu mengakses cluster Minikube yang berjalan di laptop lokal. Runner GitHub tidak bisa mengakses localhost, sehingga dibutuhkan self-hosted runner.
 
 ### Cara Kerja
 
@@ -105,10 +178,10 @@ Developer push kode ke main
         │
         ▼
 GitHub Actions Pipeline
-  ├── Build Docker image
-  ├── Push ke GHCR (ghcr.io/dianggraaeni/taskflow-api:sha-<commit>)
+  ├── [build] Build Docker image
+  ├── [build] Push ke GHCR (ghcr.io/dianggraaeni/taskflow-api:sha-<commit>)
   │
-  └── Deploy ke Kubernetes
+  └── [deploy] Deploy ke Kubernetes
         ├── kubectl set image ...
         └── Rolling update otomatis → Zero Downtime ✅
 ```
@@ -122,14 +195,55 @@ GitHub Actions Pipeline
 
 > Dokumentasi lengkap CI/CD: [docs/cicd-ke-kubernetes.md](docs/cicd-ke-kubernetes.md)
 
+---
+
 ## Dokumentasi Insiden
 
 | Insiden | Dokumen | Apa yang Dibuktikan |
 |---------|---------|---------------------|
-| #1 Self-Healing | [docs/insiden-1-selfhealing.md](docs/insiden-1-selfhealing.md) | Pod restart otomatis setelah crash |
-| #2 Rolling Update | [docs/insiden-2-rolling-update.md](docs/insiden-2-rolling-update.md) | Update tanpa HTTP error |
-| #3 Rollback | [docs/insiden-3-rollback.md](docs/insiden-3-rollback.md) | Rollback < 60 detik |
-| #6 Isolasi | [docs/insiden-6-isolation.md](docs/insiden-6-isolation.md) | Namespace dev & prod terpisah |
+| #1 Self-Healing | [docs/insiden-1-selfhealing.md](docs/insiden-1-selfhealing.md) | Pod restart otomatis < 15 detik |
+| #2 Rolling Update | [docs/insiden-2-rolling-update.md](docs/insiden-2-rolling-update.md) | Update tanpa HTTP error (semua 200 OK) |
+| #3 Rollback | [docs/insiden-3-rollback.md](docs/insiden-3-rollback.md) | Rollback < 60 detik vs 25 menit manual |
+| #6 Isolasi | [docs/insiden-6-isolation.md](docs/insiden-6-isolation.md) | Namespace dev & prod benar-benar terpisah |
+
+---
+
+## Troubleshooting
+
+### Minikube tidak bisa start
+```bash
+# Reset minikube
+minikube delete
+minikube start --cpus=2 --memory=4096
+```
+
+### Pod stuck di Pending
+```bash
+# Cek event untuk melihat penyebab
+kubectl describe pod <nama-pod> -n taskflow-prod
+kubectl get events -n taskflow-prod
+```
+
+### ImagePullBackOff
+```bash
+# Buat secret untuk GHCR jika menggunakan image privat
+kubectl create secret docker-registry ghcr-secret \
+  --docker-server=ghcr.io \
+  --docker-username=<username-github> \
+  --docker-password=<personal-access-token> \
+  -n taskflow-prod
+```
+
+### Tidak bisa akses URL
+```bash
+# Dapatkan URL yang benar dari minikube
+minikube service taskflow-api -n taskflow-prod --url
+
+# Atau buka langsung di browser
+minikube service taskflow-api -n taskflow-prod
+```
+
+---
 
 ## Anggota Kelompok
 
