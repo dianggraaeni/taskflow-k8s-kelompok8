@@ -40,4 +40,3 @@ Berdasarkan log di bawah, terlihat bahwa selama proses transisi berlangsung, sem
 
 ## Kesimpulan
 Dengan Kubernetes, Insiden 2 tidak akan terulang kembali. Tim dapat melakukan rilis fitur kapan saja tanpa perlu khawatir merugikan klien akibat downtime.
-```
