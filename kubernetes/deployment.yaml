@@ -8,21 +8,19 @@ metadata:
     managed-by: kelompok8
 spec:
   replicas: 2
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1        # Boleh buat 1 Pod ekstra sementara update
-      maxUnavailable: 0  # Jangan matikan Pod lama sebelum yang baru siap
   selector:
     matchLabels:
       app: taskflow-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: taskflow-api
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret  # Secret untuk pull image dari GHCR (privat)
       containers:
         - name: taskflow-api
           image: hashicorp/http-echo:latest
@@ -31,6 +29,12 @@ spec:
             - "-listen=:8080"
           ports:
             - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
           resources:
             requests:
               memory: "64Mi"
